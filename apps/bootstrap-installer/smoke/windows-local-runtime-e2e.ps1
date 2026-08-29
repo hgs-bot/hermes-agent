@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$InstallerPath = (Join-Path $PSScriptRoot "Hermes_0.0.1_x64-setup.exe"),
+    [string]$InstallerPath = "",
     [string]$ExpectedInstallerSha256 = "",
     [string]$InstallHome = (Join-Path $env:LOCALAPPDATA "hermes"),
     [string]$SmokeHome = (Join-Path $env:LOCALAPPDATA "hermes-local-runtime-e2e-8fe1c354"),
@@ -237,6 +237,9 @@ if ($env:OS -ne "Windows_NT") {
     throw "This E2E smoke gate must run on native Windows."
 }
 
+if ([string]::IsNullOrWhiteSpace($InstallerPath)) {
+    $InstallerPath = Join-Path $PSScriptRoot "Hermes_0.0.1_x64-setup.exe"
+}
 $InstallerPath = [System.IO.Path]::GetFullPath($InstallerPath)
 $ExpectedInstallerSha256 = $ExpectedInstallerSha256.ToLowerInvariant()
 $HermesCli = Join-Path $InstallHome "hermes-agent\venv\Scripts\hermes.exe"

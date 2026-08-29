@@ -3,8 +3,8 @@ param(
     [string]$InstallerPath = "",
     [string]$ExpectedInstallerSha256 = "",
     [string]$ExpectedBuildCommit = "",
-    [string]$InstallHome = (Join-Path $env:LOCALAPPDATA "hermes"),
-    [string]$SmokeHome = (Join-Path $env:LOCALAPPDATA "hermes-local-runtime-e2e-v1"),
+    [string]$InstallHome = "",
+    [string]$SmokeHome = "",
     [int]$Port = 18080,
     [switch]$SkipInstaller,
     [switch]$KeepRuntime,
@@ -67,6 +67,14 @@ function Resolve-E2EIdentity {
     }
 }
 
+function Resolve-E2EInstallHome {
+    param([string]$LocalAppData, [string]$Override)
+    if (-not [string]::IsNullOrWhiteSpace($Override)) {
+        return [System.IO.Path]::GetFullPath($Override)
+    }
+    return Join-Path $LocalAppData "hermes-local-runtime-e2e-install-v1"
+}
+
 function Get-GpuMemoryUsedMiB {
     $NvidiaSmi = Get-Command "nvidia-smi.exe" -ErrorAction SilentlyContinue
     if ($null -eq $NvidiaSmi) {
@@ -114,9 +122,6 @@ function Wait-ForHermesInstall {
 function Start-HermesBootstrapIfNeeded {
     param([string]$HermesCli, [string]$CompleteMarker)
     if ((Test-Path -LiteralPath $HermesCli -PathType Leaf) -and (Test-Path -LiteralPath $CompleteMarker -PathType Leaf)) {
-        return
-    }
-    if ($null -ne (Get-Process -Name "Hermes" -ErrorAction SilentlyContinue | Select-Object -First 1)) {
         return
     }
     $Candidates = @(
@@ -237,7 +242,10 @@ function Invoke-SelfTest {
         $Identity = Resolve-E2EIdentity -BuildCommit "0123456789abcdef0123456789abcdef01234567"
         Assert-True ($Identity.build_commit -eq "0123456789abcdef0123456789abcdef01234567") "Build identity must preserve the supplied full commit."
         Assert-True ($Identity.result_filename -eq "results-e2e-v1.json") "Result filename must not contain a stale build commit."
-        [pscustomobject]@{ ok = $true; cache_idempotency = $true; cuda_delta_inference = $true; build_identity = $true } | ConvertTo-Json -Compress
+        $IsolatedHome = Resolve-E2EInstallHome -LocalAppData "C:\Users\fixture\AppData\Local" -Override ""
+        Assert-True ($IsolatedHome -like "*hermes-local-runtime-e2e-install-v1") "Default install must use the isolated E2E home."
+        Assert-True ($IsolatedHome -ne "C:\Users\fixture\AppData\Local\hermes") "Default install must never target the active Hermes home."
+        [pscustomobject]@{ ok = $true; cache_idempotency = $true; cuda_delta_inference = $true; build_identity = $true; isolated_install = $true } | ConvertTo-Json -Compress
     }
     finally {
         Remove-Item -LiteralPath $Root -Recurse -Force -ErrorAction SilentlyContinue
@@ -259,6 +267,10 @@ if ([string]::IsNullOrWhiteSpace($InstallerPath)) {
 $InstallerPath = [System.IO.Path]::GetFullPath($InstallerPath)
 $ExpectedInstallerSha256 = $ExpectedInstallerSha256.ToLowerInvariant()
 $Identity = Resolve-E2EIdentity -BuildCommit $ExpectedBuildCommit
+$InstallHome = Resolve-E2EInstallHome -LocalAppData $env:LOCALAPPDATA -Override $InstallHome
+if ([string]::IsNullOrWhiteSpace($SmokeHome)) {
+    $SmokeHome = Join-Path $env:LOCALAPPDATA "hermes-local-runtime-e2e-home-v1"
+}
 $HermesCli = Join-Path $InstallHome "hermes-agent\venv\Scripts\hermes.exe"
 $Python = Join-Path $InstallHome "hermes-agent\venv\Scripts\python.exe"
 $CompleteMarker = Join-Path $InstallHome "hermes-agent\.hermes-bootstrap-complete"
@@ -271,6 +283,8 @@ $Result = [ordered]@{
     ok = $false
     installer_version = "0.0.1"
     build_commit = $Identity.build_commit
+    install_home = $InstallHome
+    smoke_home = $SmokeHome
     installer_sha256 = $null
     install_contract = $false
     cache_idempotent = $false
@@ -299,6 +313,9 @@ try {
     $ActualHash = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash.ToLowerInvariant()
     $Result.installer_sha256 = $ActualHash
     Assert-True ($ActualHash -eq $ExpectedInstallerSha256) "Installer SHA256 mismatch: expected $ExpectedInstallerSha256, got $ActualHash"
+
+    New-Item -ItemType Directory -Path $InstallHome -Force | Out-Null
+    $env:HERMES_HOME = $InstallHome
 
     if (-not $SkipInstaller) {
         Write-Host "Launching verified Hermes installer. Complete the visible setup window; this runner will continue automatically."

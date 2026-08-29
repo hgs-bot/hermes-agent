@@ -2,8 +2,9 @@
 param(
     [string]$InstallerPath = "",
     [string]$ExpectedInstallerSha256 = "",
+    [string]$ExpectedBuildCommit = "",
     [string]$InstallHome = (Join-Path $env:LOCALAPPDATA "hermes"),
-    [string]$SmokeHome = (Join-Path $env:LOCALAPPDATA "hermes-local-runtime-e2e-8fe1c354"),
+    [string]$SmokeHome = (Join-Path $env:LOCALAPPDATA "hermes-local-runtime-e2e-v1"),
     [int]$Port = 18080,
     [switch]$SkipInstaller,
     [switch]$KeepRuntime,
@@ -52,6 +53,18 @@ function Resolve-Backend {
         return "cuda"
     }
     return "cpu-or-unknown"
+}
+
+function Resolve-E2EIdentity {
+    param([string]$BuildCommit)
+    if ($BuildCommit -notmatch "^[0-9a-fA-F]{40}$") {
+        throw "ExpectedBuildCommit must be a full 40-character Git commit."
+    }
+    return [pscustomobject]@{
+        build_commit = $BuildCommit.ToLowerInvariant()
+        smoke_id = "e2e-v1"
+        result_filename = "results-e2e-v1.json"
+    }
 }
 
 function Get-GpuMemoryUsedMiB {
@@ -221,7 +234,10 @@ function Invoke-SelfTest {
         Assert-True (-not (Compare-CacheSnapshots -Before $First -After $Third)) "Changed cache snapshots must compare unequal."
         Assert-True ((Resolve-Backend -VramDeltaMiB 4908) -eq "cuda") "V6 VRAM delta must resolve to CUDA."
         Assert-True ((Resolve-Backend -VramDeltaMiB 0) -eq "cpu-or-unknown") "Zero VRAM delta must not resolve to CUDA."
-        [pscustomobject]@{ ok = $true; cache_idempotency = $true; cuda_delta_inference = $true } | ConvertTo-Json -Compress
+        $Identity = Resolve-E2EIdentity -BuildCommit "0123456789abcdef0123456789abcdef01234567"
+        Assert-True ($Identity.build_commit -eq "0123456789abcdef0123456789abcdef01234567") "Build identity must preserve the supplied full commit."
+        Assert-True ($Identity.result_filename -eq "results-e2e-v1.json") "Result filename must not contain a stale build commit."
+        [pscustomobject]@{ ok = $true; cache_idempotency = $true; cuda_delta_inference = $true; build_identity = $true } | ConvertTo-Json -Compress
     }
     finally {
         Remove-Item -LiteralPath $Root -Recurse -Force -ErrorAction SilentlyContinue
@@ -242,18 +258,19 @@ if ([string]::IsNullOrWhiteSpace($InstallerPath)) {
 }
 $InstallerPath = [System.IO.Path]::GetFullPath($InstallerPath)
 $ExpectedInstallerSha256 = $ExpectedInstallerSha256.ToLowerInvariant()
+$Identity = Resolve-E2EIdentity -BuildCommit $ExpectedBuildCommit
 $HermesCli = Join-Path $InstallHome "hermes-agent\venv\Scripts\hermes.exe"
 $Python = Join-Path $InstallHome "hermes-agent\venv\Scripts\python.exe"
 $CompleteMarker = Join-Path $InstallHome "hermes-agent\.hermes-bootstrap-complete"
 $ContractSmoke = Join-Path $PSScriptRoot "windows-local-runtime-smoke.ps1"
-$ResultPath = Join-Path $PSScriptRoot "results-e2e-8fe1c354.json"
+$ResultPath = Join-Path $PSScriptRoot $Identity.result_filename
 $PreviousHermesHome = $env:HERMES_HOME
 $StartedRuntime = $false
 $Result = [ordered]@{
     schema = "hermes-local-runtime-e2e@1"
     ok = $false
     installer_version = "0.0.1"
-    build_commit = "8fe1c354310c6b3dea20a345873acc06597c86ba"
+    build_commit = $Identity.build_commit
     installer_sha256 = $null
     install_contract = $false
     cache_idempotent = $false

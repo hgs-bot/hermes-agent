@@ -40,6 +40,10 @@ jobs:
           npm test
           npm run build
 
+      - name: Verify native E2E smoke runner
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File apps/bootstrap-installer/smoke/windows-local-runtime-e2e.ps1 -SelfTest
+
       - name: Verify Rust installer on native Windows
         working-directory: apps/bootstrap-installer/src-tauri
         run: cargo test --lib

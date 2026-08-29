@@ -75,20 +75,59 @@ function Resolve-E2EInstallHome {
     return Join-Path $LocalAppData "hermes-local-runtime-e2e-install-v1"
 }
 
+function ConvertFrom-NvidiaSmiMemoryOutput {
+    param([string]$Raw)
+    $FirstLine = @($Raw -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) | Select-Object -First 1
+    $Value = 0
+    if ($null -eq $FirstLine -or -not [int]::TryParse(([string]$FirstLine).Trim(), [ref]$Value)) {
+        throw "Could not parse nvidia-smi memory.used output: $Raw"
+    }
+    return $Value
+}
+
 function Get-GpuMemoryUsedMiB {
+    param([int]$MaxAttempts = 5, [int]$RetryDelayMilliseconds = 1000)
     $NvidiaSmi = Get-Command "nvidia-smi.exe" -ErrorAction SilentlyContinue
     if ($null -eq $NvidiaSmi) {
         throw "nvidia-smi.exe is required for the CUDA/VRAM smoke gate."
     }
-    $Raw = (& $NvidiaSmi.Source --query-gpu=memory.used --format=csv,noheader,nounits 2>&1 | Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0 -or $null -eq $Raw) {
-        throw "nvidia-smi failed: $Raw"
+
+    $LastDiagnostic = "no attempt completed"
+    for ($Attempt = 1; $Attempt -le $MaxAttempts; $Attempt++) {
+        $Token = [Guid]::NewGuid().ToString("N")
+        $StdoutPath = Join-Path ([System.IO.Path]::GetTempPath()) "hermes-nvidia-smi-$Token.stdout.log"
+        $StderrPath = Join-Path ([System.IO.Path]::GetTempPath()) "hermes-nvidia-smi-$Token.stderr.log"
+        try {
+            $Process = Start-Process -FilePath $NvidiaSmi.Source `
+                -ArgumentList @("--query-gpu=memory.used", "--format=csv,noheader,nounits") `
+                -RedirectStandardOutput $StdoutPath `
+                -RedirectStandardError $StderrPath `
+                -NoNewWindow -Wait -PassThru
+            $Stdout = if (Test-Path -LiteralPath $StdoutPath) { Get-Content -LiteralPath $StdoutPath -Raw } else { "" }
+            $Stderr = if (Test-Path -LiteralPath $StderrPath) { Get-Content -LiteralPath $StderrPath -Raw } else { "" }
+            if ($Process.ExitCode -eq 0) {
+                try {
+                    return ConvertFrom-NvidiaSmiMemoryOutput -Raw $Stdout
+                }
+                catch {
+                    $LastDiagnostic = "attempt $Attempt/$MaxAttempts exit=0 stdout='$($Stdout.Trim())' stderr='$($Stderr.Trim())' parse_error='$($_.Exception.Message)'"
+                }
+            }
+            else {
+                $LastDiagnostic = "attempt $Attempt/$MaxAttempts exit=$($Process.ExitCode) stdout='$($Stdout.Trim())' stderr='$($Stderr.Trim())'"
+            }
+        }
+        catch {
+            $LastDiagnostic = "attempt $Attempt/$MaxAttempts process_error='$($_.Exception.Message)'"
+        }
+        finally {
+            Remove-Item -LiteralPath $StdoutPath, $StderrPath -Force -ErrorAction SilentlyContinue
+        }
+        if ($Attempt -lt $MaxAttempts) {
+            Start-Sleep -Milliseconds $RetryDelayMilliseconds
+        }
     }
-    $Value = 0
-    if (-not [int]::TryParse(([string]$Raw).Trim(), [ref]$Value)) {
-        throw "Could not parse nvidia-smi memory.used output: $Raw"
-    }
-    return $Value
+    throw "nvidia-smi failed after $MaxAttempts attempts: $LastDiagnostic"
 }
 
 function Invoke-Hermes {
@@ -239,13 +278,18 @@ function Invoke-SelfTest {
         Assert-True (-not (Compare-CacheSnapshots -Before $First -After $Third)) "Changed cache snapshots must compare unequal."
         Assert-True ((Resolve-Backend -VramDeltaMiB 4908) -eq "cuda") "V6 VRAM delta must resolve to CUDA."
         Assert-True ((Resolve-Backend -VramDeltaMiB 0) -eq "cpu-or-unknown") "Zero VRAM delta must not resolve to CUDA."
+        $global:LASTEXITCODE = 11086
+        Assert-True ((ConvertFrom-NvidiaSmiMemoryOutput -Raw "11086`r`n") -eq 11086) "Numeric nvidia-smi output must not be confused with a stale LASTEXITCODE."
+        $ParseRejected = $false
+        try { ConvertFrom-NvidiaSmiMemoryOutput -Raw "driver unavailable" | Out-Null } catch { $ParseRejected = $true }
+        Assert-True $ParseRejected "Malformed nvidia-smi output must be rejected."
         $Identity = Resolve-E2EIdentity -BuildCommit "0123456789abcdef0123456789abcdef01234567"
         Assert-True ($Identity.build_commit -eq "0123456789abcdef0123456789abcdef01234567") "Build identity must preserve the supplied full commit."
         Assert-True ($Identity.result_filename -eq "results-e2e-v1.json") "Result filename must not contain a stale build commit."
         $IsolatedHome = Resolve-E2EInstallHome -LocalAppData "C:\Users\fixture\AppData\Local" -Override ""
         Assert-True ($IsolatedHome -like "*hermes-local-runtime-e2e-install-v1") "Default install must use the isolated E2E home."
         Assert-True ($IsolatedHome -ne "C:\Users\fixture\AppData\Local\hermes") "Default install must never target the active Hermes home."
-        [pscustomobject]@{ ok = $true; cache_idempotency = $true; cuda_delta_inference = $true; build_identity = $true; isolated_install = $true } | ConvertTo-Json -Compress
+        [pscustomobject]@{ ok = $true; cache_idempotency = $true; cuda_delta_inference = $true; nvidia_smi_output = $true; build_identity = $true; isolated_install = $true } | ConvertTo-Json -Compress
     }
     finally {
         Remove-Item -LiteralPath $Root -Recurse -Force -ErrorAction SilentlyContinue

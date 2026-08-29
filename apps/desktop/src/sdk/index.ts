@@ -1427,6 +1427,14 @@ export type { HermesOpenTarget } from '@/lib/hermes-open-target'
 export * as icons from '@/lib/icons'
 export { type KeybindContribution, KEYBINDS_AREA } from '@/lib/keybinds/actions'
 export { formatModifierToken } from '@/lib/keybinds/combo'
+/** Extend the canonical model picker with provider-owned rows. The host passes
+ *  live search/current selection state and owns selection + close semantics. */
+export {
+  MODEL_PICKER_PROVIDERS_AREA,
+  type ModelPickerProviderContribution,
+  type ModelPickerProviderRenderProps,
+  type ModelPickerSelection
+} from '@/lib/model-picker-contributions'
 /** The app's deterministic identity color for a name (profiles, assignees,
  *  authors) + its translucent tag fill — so plugin-rendered identities read
  *  the same hue as everywhere else. */

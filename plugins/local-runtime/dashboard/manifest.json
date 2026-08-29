@@ -1,0 +1,7 @@
+{
+  "name": "local-runtime",
+  "label": "Local Runtime",
+  "description": "Manage Hermes-owned local llama.cpp models and runtime",
+  "version": "1.0.0",
+  "api": "plugin_api.py"
+}

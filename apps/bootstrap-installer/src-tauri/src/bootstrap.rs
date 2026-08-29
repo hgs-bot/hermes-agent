@@ -785,6 +785,23 @@ async fn run_bootstrap(
         .unwrap_or_else(|| crate::paths::hermes_home().to_string_lossy().into_owned());
     let install_root = PathBuf::from(&hermes_home).join("hermes-agent");
 
+    // Windows installer contract: `dependencies` has completed, so the venv
+    // console script must expose the lightweight local-runtime command before
+    // we publish the completion marker. This invokes help only — llama.cpp,
+    // CUDA, and model assets remain lazy checksum-pinned downloads.
+    #[cfg(target_os = "windows")]
+    if let Err(err) = crate::local_runtime::verify_installed_local_cli(&install_root) {
+        let msg = format!("verify installed local runtime CLI failed: {err:#}");
+        emit_event(
+            &app,
+            BootstrapEvent::Failed {
+                stage: Some("dependencies".to_string()),
+                error: msg.clone(),
+            },
+        );
+        return Err(anyhow!(msg));
+    }
+
     // Marker publish is terminal for this run: a write failure must emit Failed
     // so the UI leaves the progress state (it does not poll get_bootstrap_status).
     let marker = match write_bootstrap_complete_marker(&install_root, &pin) {

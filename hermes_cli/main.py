@@ -442,6 +442,7 @@ import functools as _functools
 
 from hermes_cli.subcommands._shared import add_accept_hooks_flag as _add_accept_hooks_flag
 from hermes_cli.subcommands.cron import build_cron_parser
+from hermes_cli.subcommands.local import build_local_parser
 from hermes_cli.subcommands.sync import build_sync_parser
 from hermes_cli.subcommands.gateway import build_gateway_parser
 from hermes_cli.subcommands.profile import build_profile_parser
@@ -5557,6 +5558,13 @@ def cmd_status(args):
     from hermes_cli.status import show_status
 
     show_status(args)
+
+
+def cmd_local(args):
+    """Manage the Hermes-owned local llama-server sidecar."""
+    from hermes_cli.local_runtime_cmd import local_command
+
+    return local_command(args)
 
 
 def cmd_cron(args):
@@ -13428,6 +13436,11 @@ def main():
     # status command  (parser built in hermes_cli/subcommands/status.py)
     # =========================================================================
     build_status_parser(subparsers, cmd_status=cmd_status)
+
+    # =========================================================================
+    # local llama-server runtime
+    # =========================================================================
+    build_local_parser(subparsers, cmd_local=cmd_local)
 
     # =========================================================================
     # pause / resume commands  (parser built in hermes_cli/subcommands/pause.py)

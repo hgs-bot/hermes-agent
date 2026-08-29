@@ -1,8 +1,16 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { createElement, useState } from 'react'
 
+import { ContribBoundary } from '@/contrib/react/boundary'
+import { useContributions } from '@/contrib/react/use-contributions'
 import { useI18n } from '@/i18n'
 import { modelOptionsQueryKey, requestModelOptions } from '@/lib/model-options'
+import {
+  isModelPickerProviderContribution,
+  MODEL_PICKER_PROVIDERS_AREA,
+  type ModelPickerProviderRenderProps,
+  type ModelPickerSelection
+} from '@/lib/model-picker-contributions'
 import { modelSearchText } from '@/lib/model-search-text'
 import { currentPickerSelection } from '@/lib/model-status-label'
 import { normalize } from '@/lib/text'
@@ -78,10 +86,20 @@ export function ModelPickerDialog({
       : String(modelOptions.error)
     : null
 
-  const selectModel = (provider: ModelOptionProvider, model: string) => {
-    onSelect({ provider: provider.slug, model })
+  const select = (selection: ModelPickerSelection) => {
+    const provider = selection.provider.trim()
+    const model = selection.model.trim()
+
+    if (!provider || !model) {
+      return
+    }
+
+    onSelect({ provider, model })
     onOpenChange(false)
   }
+
+  const close = () => onOpenChange(false)
+  const selectModel = (provider: ModelOptionProvider, model: string) => select({ provider: provider.slug, model })
 
   // Open the full onboarding provider selector to add/switch a provider.
   // Reuses the entire onboarding flow (OAuth rows, API-key form, device-code,
@@ -110,6 +128,14 @@ export function ModelPickerDialog({
           <CommandInput autoFocus onValueChange={setSearch} placeholder={copy.search} value={search} />
           <CommandList className="max-h-96">
             {!loading && !error && <CommandEmpty>{copy.noModels}</CommandEmpty>}
+            <ModelPickerProviderContributions
+              close={close}
+              currentModel={optionsModel || currentModel}
+              currentProvider={optionsProvider || currentProvider}
+              scopeKey={`${profile}:${sessionId ?? 'global'}`}
+              search={search}
+              select={select}
+            />
             <ModelResults
               currentModel={optionsModel || currentModel}
               currentProvider={optionsProvider || currentProvider}
@@ -133,6 +159,22 @@ export function ModelPickerDialog({
       </DialogContent>
     </Dialog>
   )
+}
+
+function ModelPickerProviderContributions(props: ModelPickerProviderRenderProps) {
+  const contributions = useContributions(MODEL_PICKER_PROVIDERS_AREA)
+
+  return contributions.map(contribution => {
+    if (!isModelPickerProviderContribution(contribution.data)) {
+      return null
+    }
+
+    return (
+      <ContribBoundary id={contribution.id} key={contribution.id}>
+        {createElement(contribution.data.render, props)}
+      </ContribBoundary>
+    )
+  })
 }
 
 function ModelResults({

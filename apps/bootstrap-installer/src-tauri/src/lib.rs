@@ -11,6 +11,7 @@
 mod bootstrap;
 mod events;
 mod install_script;
+mod local_runtime;
 mod powershell;
 mod paths;
 mod update;

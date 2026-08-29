@@ -2090,7 +2090,11 @@ function Install-Repository {
                     git -c windows.appendAtomically=false stash push --include-untracked -m "$stashName"
                     if ($LASTEXITCODE -eq 0) { $autostashRef = "stash@{0}" }
                 }
-                git -c windows.appendAtomically=false fetch origin $Branch
+                # Test/release installers may intentionally resolve from a fork
+                # while updating an existing managed checkout whose `origin`
+                # still points at NousResearch. Fetch from the installer-owned
+                # URL without mutating that persistent origin.
+                git -c windows.appendAtomically=false fetch $RepoUrlHttps $Branch
                 if ($LASTEXITCODE -ne 0) { throw "git fetch failed (exit $LASTEXITCODE)" }
                 # Precedence: Commit > Tag > Branch.  Commit and Tag check
                 # out as detached HEAD intentionally -- they're meant to be
@@ -2098,7 +2102,7 @@ function Install-Repository {
                 if ($Commit) {
                     # Make sure we have the commit locally (a tag-less commit
                     # SHA isn't always reachable from any one branch fetch).
-                    git -c windows.appendAtomically=false fetch origin $Commit
+                    git -c windows.appendAtomically=false fetch $RepoUrlHttps $Commit
                     # A commit pin must never move an existing install
                     # BACKWARDS. hermes-setup.exe bakes its build-time commit
                     # into the binary (BUILD_PIN_COMMIT) and passes it as
